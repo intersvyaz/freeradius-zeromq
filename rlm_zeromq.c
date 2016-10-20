@@ -31,7 +31,7 @@ typedef struct rlm_zeromq_conn {
 } rlm_zeromq_conn_t;
 
 static const CONF_PARSER module_config[] = {
-    {"server", FR_CONF_OFFSET(PW_TYPE_STRING | PW_TYPE_REQUIRED, rlm_zeromq_t, cfg.server), NULL},
+    {"server", FR_CONF_OFFSET(PW_TYPE_STRING | PW_TYPE_NOT_EMPTY, rlm_zeromq_t, cfg.server), NULL},
     {"format", FR_CONF_OFFSET(PW_TYPE_STRING | PW_TYPE_REQUIRED, rlm_zeromq_t, cfg.format), NULL},
     {"data", FR_CONF_OFFSET(PW_TYPE_STRING | PW_TYPE_TMPL | PW_TYPE_REQUIRED, rlm_zeromq_t, cfg.data), NULL},
     CONF_PARSER_TERMINATOR
@@ -49,7 +49,7 @@ static int mod_detach(void *instance) {
 
   if (inst->zmq_ctx) {
     if (0 != zmq_ctx_destroy(inst->zmq_ctx)) {
-      ERROR("rlm_zeromq (%s): ungraceful zeromq context close: %s", inst->name, zmq_strerror(errno));
+      ERROR("rlm_zeromq (%s): Ungraceful zeromq context close: %s", inst->name, zmq_strerror(errno));
     }
   }
 
@@ -64,7 +64,7 @@ static int mod_detach(void *instance) {
 static int mod_conn_free(rlm_zeromq_conn_t *conn) {
   if (conn->sock) {
     if (0 != zmq_close(conn->sock)) {
-      ERROR("rlm_zeromq: ungraceful zeromq socket close: %s", zmq_strerror(errno));
+      ERROR("rlm_zeromq: Ungraceful zeromq socket close: %s", zmq_strerror(errno));
     }
   }
 
@@ -83,14 +83,14 @@ static void *mod_conn_create(TALLOC_CTX *ctx, void *instance) {
 
   void *sock = NULL;
 
-  sock= zmq_socket(inst->zmq_ctx, ZMQ_PUSH);
+  sock = zmq_socket(inst->zmq_ctx, ZMQ_PUSH);
   if (!sock) {
-    ERROR("rlm_zeromq (%s): failed to create socket: %s", inst->name, zmq_strerror(errno));
+    ERROR("rlm_zeromq (%s): Failed to create socket: %s", inst->name, zmq_strerror(errno));
     goto err;
   }
 
   if (zmq_connect(sock, inst->cfg.server) != 0) {
-    ERROR("rlm_zeromq (%s): failed to connect to '%s': %s", inst->name, inst->cfg.server, zmq_strerror(errno));
+    ERROR("rlm_zeromq (%s): Failed to connect to '%s': %s", inst->name, inst->cfg.server, zmq_strerror(errno));
     goto err;
   }
 
@@ -125,14 +125,26 @@ static int mod_instantiate(CONF_SECTION *conf, void *instance) {
   } else if (!strcasecmp(inst->cfg.format, RLM_ZEROMQ_FORMAT_BSON_STR)) {
     inst->format = RLM_ZEROMQ_FORMAT_BSON;
   } else {
-    cf_log_err_cs(conf, "invalid 'format' option, use 'raw' or 'bson'");
+    cf_log_err_cs(conf, "Invalid 'format' option, use 'raw' or 'bson'");
     goto err;
   }
 
-  inst->zmq_ctx = zmq_ctx_new();
-  if (!inst->zmq_ctx) {
-    ERROR("rlm_zeromq (%s): failed to create zeromq context: %s", inst->name, zmq_strerror(errno));
-    goto err;
+  if (!cf_pair_find(conf, "pool")) {
+    if (!inst->cfg.server) {
+      cf_log_err_cs(conf, "Invalid or missing 'server' option");
+      goto err;
+    }
+
+    inst->zmq_ctx = zmq_ctx_new();
+    if (!inst->zmq_ctx) {
+      ERROR("rlm_zeromq (%s): Failed to create zeromq context: %s", inst->name, zmq_strerror(errno));
+      goto err;
+    }
+  } else {
+    if (inst->cfg.server) {
+      cf_log_err_cs(conf, "Can't use server option when foreign connection pool specified");
+      goto err;
+    }
   }
 
   inst->pool = fr_connection_pool_module_init(conf, inst, mod_conn_create, NULL, inst->name);
@@ -170,7 +182,7 @@ static rlm_rcode_t mod_proc(void *instance, REQUEST *request) {
 
   ssize_t data_len = tmpl_aexpand(request, &data, request, inst->cfg.data, NULL, NULL);
   if (data_len < 0) {
-    RERROR("failed to substitute attributes for data '%s'", inst->cfg.data->name);
+    RERROR("Failed to substitute attributes for data '%s'", inst->cfg.data->name);
     goto end;
   }
 
@@ -191,7 +203,7 @@ static rlm_rcode_t mod_proc(void *instance, REQUEST *request) {
   }
 
   if (TEMP_FAILURE_RETRY(zmq_send(conn->sock, msg, msg_len, 0)) == -1) {
-    RERROR("failed to send message: %s", zmq_strerror(errno));
+    RERROR("Failed to send message: %s", zmq_strerror(errno));
   } else {
     code = RLM_MODULE_OK;
   }
